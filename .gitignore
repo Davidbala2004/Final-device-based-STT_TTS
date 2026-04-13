@@ -44,5 +44,5 @@ results/
 *.bin
 *.pt
 *.pth
-models/
+# Note: Do NOT add `models/` here — it breaks tts/models/ Python package
 Downloads/
