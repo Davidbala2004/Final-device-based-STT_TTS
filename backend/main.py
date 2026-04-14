@@ -144,7 +144,6 @@ class AccessLogFilter(logging.Filter):
 
 if __name__ == "__main__":
     logger.info(f"[DAEMON] AI Judge Server waking up on Port {API_PORT}...")
-    # Suppress health check spam from Uvicorn access logs
     # Suppress high-frequency polling spam from Uvicorn access logs
     logging.getLogger("uvicorn.access").addFilter(AccessLogFilter())
-    uvicorn.run(app, host=API_HOST, port=API_PORT)
+    uvicorn.run(app, host=API_HOST, port=API_PORT, timeout_keep_alive=300)

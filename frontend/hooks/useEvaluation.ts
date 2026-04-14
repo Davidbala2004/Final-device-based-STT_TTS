@@ -2,8 +2,8 @@
 
 import { useState, useCallback } from "react";
 
-// Use direct backend URL if provided (for large audio support), otherwise fallback to local proxy
-const EVALUATION_API_BASE_URL = process.env.NEXT_PUBLIC_EVALUATION_API_BASE_URL || "/api/evaluation";
+// Use the high-capacity bridge route to bypass standard 4MB entity limits in Next.js
+const EVALUATION_API_BASE_URL = "/api/evaluation/evaluate";
 
 export interface EvaluationResult {
   [key: string]: unknown;
@@ -62,7 +62,7 @@ export function useEvaluation(): UseEvaluationResult {
     console.log("[useEvaluation] [TRACE] FormData prepared. Dispatching POST request to Judges Core...");
 
     try {
-      const response = await fetch(`${EVALUATION_API_BASE_URL}/evaluate`, {
+      const response = await fetch(EVALUATION_API_BASE_URL, {
         method: "POST",
         body: formData,
       });
