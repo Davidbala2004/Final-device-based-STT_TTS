@@ -34,7 +34,7 @@ audio_cache/
 backend/audio_cache/
 tts/audio_cache/
 backend/temp/
-results/
+/results/
 
 # Models & Large Binaries
 # (Docker handles these downloads)
