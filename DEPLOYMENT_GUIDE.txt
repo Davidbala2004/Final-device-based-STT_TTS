@@ -1,0 +1,63 @@
+=============================================================================
+             REAL-TIME STT-TTS SYSTEM DEPLOYMENT GUIDE (v2.1)
+=============================================================================
+Target OS: Linux (Ubuntu/Debian recommended), Windows, macOS
+Deployment Method: Docker Compose
+=============================================================================
+
+--- 1. SYSTEM PREREQUISITES ---
+- Docker installed (sudo docker --version)
+- Docker Compose installed (sudo docker-compose --version)
+- Git installed (for cloning)
+- Port 3000, 8000, 8001, 8002, and 6379 must be free.
+
+--- 2. FIRST-TIME DEPLOYMENT ---
+Run these commands in your terminal:
+
+   git clone <YOUR_REPOSITORY_LINK>
+   cd STT-FINAL
+   sudo docker-compose up --build --no-cache -d
+
+   *Note: The first build takes 5-10 minutes because it downloads the
+    neural AI models and pins the stable WebAssembly runtime.*
+
+--- 3. UPDATING / RE-DEPLOYING (The "Quiet Fix") ---
+If you are applying the new "Silence Mode" updates or fixing WASM errors:
+
+   sudo docker-compose down
+   sudo docker-compose build --no-cache
+   sudo docker-compose up -d
+
+--- 4. SERVICE ACCESS ---
+- Main Application:    http://localhost:3000
+- Results Page:        http://localhost:3000/results
+- TTS Admin Panel:     http://localhost:8002
+- API Health Check:    http://localhost:8001/health
+
+--- 5. TROUBLESHOOTING (CRITICAL) ---
+
+A) BROWSER CACHE (If you see "LinkError" for WebAssembly):
+   The browser caches old files very aggressively. You MUST perform a 
+   HARD REFRESH after a new deployment:
+   - Linux/Windows: Ctrl + Shift + R
+   - Mac: Cmd + Shift + R
+   - Or test in Incognito/Private mode.
+
+B) THE TERMINAL IS TOO QUIET?
+   This is NORMAL. We have enabled "Silence Mode" to stop unnecessary 
+   scrolling. High-frequency pings (health checks and polling) are now
+   hidden from the terminal to keep it clean. Logs will only appear
+   when a user performs a real action (Evaluation or Synthesis).
+
+C) PORT 6379 ERROR (Redis):
+   If the terminal says "Port 6379 already in use", stop your local Redis:
+   sudo systemctl stop redis
+
+D) UNSTABLE INTERNET DURING BUILD:
+   If the build fails during "download-model", simply run the build 
+   command again. It will resume from the last successful file.
+
+=============================================================================
+Guide generated on: 2026-04-14
+Status: All Services Production-Ready (Verified Stable)
+=============================================================================
