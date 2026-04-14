@@ -63,8 +63,8 @@ logger = setup_logger("story_tts_api", settings.LOG_LEVEL, settings.JSON_LOGS)
 class AccessLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        # Suppress noise from Docker health checks and Admin Panel polling
-        return not any(path in msg for path in ["/health", "/stats", "/jobs"])
+        # Suppress noise from Docker health checks, Admin Panel polling, and voice list updates
+        return not any(path in msg for path in ["/health", "/stats", "/jobs", "/voices"])
 
 logging.getLogger("uvicorn.access").addFilter(AccessLogFilter())
 
