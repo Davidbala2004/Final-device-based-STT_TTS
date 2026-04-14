@@ -6,7 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
  * Forwards the multipart/form-data stream directly to the AI Judge.
  */
 export async function POST(request: NextRequest) {
-  const backendUrl = `${process.env.BACKEND_URL || "http://backend:8000"}/evaluate`;
+  // Direct internal Docker network link to the STT Backend
+  const backendUrl = "http://backend:8000/evaluate";
 
   console.log(`[BRIDGE] Forwarding evaluation request to: ${backendUrl}`);
 

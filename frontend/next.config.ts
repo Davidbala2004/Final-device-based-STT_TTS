@@ -39,10 +39,6 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/evaluation/:path*',
-        destination: `${process.env.BACKEND_URL || 'http://backend:8000'}/:path*`,
-      },
-      {
         source: '/api/tts/:path*',
         destination: `${process.env.TTS_API_URL || 'http://tts-api:8001'}/:path*`,
       },
