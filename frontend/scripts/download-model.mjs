@@ -14,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const TARGET_DIR = path.resolve(__dirname, "..", "public", "sherpa-onnx");
+const SMALL_TARGET_DIR = path.resolve(__dirname, "..", "public", "sherpa-onnx-small");
 
 const ASSETS = [
   {
@@ -32,10 +33,33 @@ const ASSETS = [
     saveAs: "sherpa-onnx-wasm-main-asr.wasm",
   },
   {
-    name: "WASM Data File",
+    name: "WASM Data File (Large Model)",
     url: "https://huggingface.co/spaces/k2-fsa/web-assembly-asr-sherpa-onnx-en/resolve/6d17dc0b01eda25aaf0da49286edc9d1abe16305/sherpa-onnx-wasm-main-asr.data",
     saveAs: "sherpa-onnx-wasm-main-asr.data",
   },
+];
+
+const SMALL_ASSETS = [
+  {
+    name: "Small Encoder (int8)",
+    url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-small-en-2023-06-26/resolve/main/encoder-epoch-99-avg-1.int8.onnx",
+    saveAs: "encoder.onnx",
+  },
+  {
+    name: "Small Decoder",
+    url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-small-en-2023-06-26/resolve/main/decoder-epoch-99-avg-1.onnx",
+    saveAs: "decoder.onnx",
+  },
+  {
+    name: "Small Joiner",
+    url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-small-en-2023-06-26/resolve/main/joiner-epoch-99-avg-1.onnx",
+    saveAs: "joiner.onnx",
+  },
+  {
+    name: "Small Tokens",
+    url: "https://huggingface.co/csukuangfj/sherpa-onnx-zipformer-small-en-2023-06-26/resolve/main/tokens.txt",
+    saveAs: "tokens.txt",
+  }
 ];
 
 const REQUIRED_LOCAL_FILES = ["tokens.txt"];
@@ -109,28 +133,36 @@ async function main() {
   console.log("============================================================");
 
   ensureDir(TARGET_DIR);
+  ensureDir(SMALL_TARGET_DIR);
 
   const failures = [];
 
-  for (const asset of ASSETS) {
-    const dest = path.join(TARGET_DIR, asset.saveAs);
-    console.log(`\n${asset.name}`);
+  const jobQueue = [
+    { dir: TARGET_DIR, assets: ASSETS },
+    { dir: SMALL_TARGET_DIR, assets: SMALL_ASSETS }
+  ];
 
-    if (fileExistsWithContent(dest)) {
-      console.log(`Overwriting existing file to ensure stable branch sync: ${asset.saveAs}`);
-      fs.unlinkSync(dest);
-    }
-
-    try {
-      await downloadFile(asset.url, dest);
-      if (!fileExistsWithContent(dest)) {
-        throw new Error(`Downloaded file is missing or empty: ${asset.saveAs}`);
-      }
-      console.log(`Saved: ${asset.saveAs}`);
-    } catch (err) {
-      const message = `Failed: ${err.message}`;
-      console.error(message);
-      failures.push(`${asset.saveAs}: ${err.message}`);
+  for (const job of jobQueue) {
+    for (const asset of job.assets) {
+        const dest = path.join(job.dir, asset.saveAs);
+        console.log(`\nProcessing ${asset.name} -> ${job.dir}`);
+    
+        if (fileExistsWithContent(dest)) {
+          console.log(`- File exists and has content, skipping.`);
+          continue;
+        }
+    
+        try {
+          await downloadFile(asset.url, dest);
+          if (!fileExistsWithContent(dest)) {
+            throw new Error(`Downloaded file is missing or empty: ${asset.saveAs}`);
+          }
+          console.log(`- Saved: ${asset.saveAs}`);
+        } catch (err) {
+          const message = `Failed: ${err.message}`;
+          console.error(message);
+          failures.push(`${asset.saveAs}: ${err.message}`);
+        }
     }
   }
 

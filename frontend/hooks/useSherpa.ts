@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Story, Word, ReadingCursor } from "@/lib/types";
 import { normalizeWord, getWordAtCursor, advanceCursor } from "@/lib/parseStory";
+import { modelCache } from "@/lib/modelCache";
 
 // ---------------------------------------------------------------------------
 // Types for Sherpa-ONNX WASM
@@ -95,7 +96,8 @@ export type SherpaStatus = "idle" | "loading" | "ready" | "listening" | "error";
 export interface SherpaHookResult {
   status: SherpaStatus;
   statusMessage: string;
-  start: (existingStream?: MediaStream) => Promise<void>; // Support shared stream
+  downloadProgress: number; // Combined progress (0-100)
+  start: (existingStream?: MediaStream) => Promise<void>;
   stop: () => void;
   recognizedText: string;
   cursor: ReadingCursor;
@@ -110,6 +112,7 @@ export interface SherpaHookResult {
 export function useSherpa(story: Story | null): SherpaHookResult {
   const [status, setStatus] = useState<SherpaStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("Idle");
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [recognizedText, setRecognizedText] = useState("");
   const [cursor, setCursor] = useState<ReadingCursor>({
     paragraphIndex: 0,
@@ -132,9 +135,17 @@ export function useSherpa(story: Story | null): SherpaHookResult {
   const correctCountRef = useRef<number>(0);
   const lastResultRef = useRef<string>("");
   const statusRef = useRef(status);
+  const isMobileRef = useRef(false);
 
   // Sync refs with state
-  useEffect(() => { cursorRef.current = cursor; }, [cursor]);
+  useEffect(() => { 
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    // Detect low-spec desktops (less than 4 logical cores)
+    const isLowSpec = (navigator.hardwareConcurrency || 4) < 4;
+    
+    isMobileRef.current = isMobile || isLowSpec;
+    cursorRef.current = cursor; 
+  }, [cursor]);
   useEffect(() => { storyRef.current = story; }, [story]);
   useEffect(() => { statusRef.current = status; }, [status]);
 
@@ -168,86 +179,150 @@ export function useSherpa(story: Story | null): SherpaHookResult {
       setStatus("loading");
       setStatusMessage("Loading Neural Engine...");
 
-      const win = window as any;
-      const origProcess = win.process;
-      const origRequire = win.require;
-      win.process = undefined;
-      win.require = undefined;
+      // Intelligence: Use small model if Mobile OR Low-Spec PC
+      const useSmallModel = isMobileRef.current;
+      const modelBasePath = useSmallModel ? "/sherpa-onnx-small" : "/sherpa-onnx";
+      
+      const assetMap: Record<string, string> = {};
+      const assets = useSmallModel ? [
+        { key: "tokens", file: "tokens.txt" },
+        { key: "encoder", file: "encoder.onnx" },
+        { key: "decoder", file: "decoder.onnx" },
+        { key: "joiner", file: "joiner.onnx" },
+        // We still need the standard runtime blobs even for the small model
+        { key: "api", file: "sherpa-onnx.js", path: "/sherpa-onnx" },
+        { key: "glue", file: "sherpa-onnx-wasm-main-asr.js", path: "/sherpa-onnx" },
+        { key: "wasm", file: "sherpa-onnx-wasm-main-asr.wasm", path: "/sherpa-onnx" }
+      ] : [
+        { key: "wasm", file: "sherpa-onnx-wasm-main-asr.wasm" },
+        { key: "data", file: "sherpa-onnx-wasm-main-asr.data" },
+        { key: "api", file: "sherpa-onnx.js" },
+        { key: "glue", file: "sherpa-onnx-wasm-main-asr.js" },
+        { key: "tokens", file: "tokens.txt" }
+      ];
 
-      const moduleConfig: SherpaModule = {
-        locateFile: (path: string) => {
-          if (path.endsWith(".wasm") || path.endsWith(".data")) {
-            return `${WASM_BASE_PATH}/${path}`;
+      (async () => {
+        try {
+          let loadedCount = 0;
+          for (const asset of assets) {
+            const base = asset.path || modelBasePath;
+            const blobUrl = await modelCache.getFile(
+              `${base}/${asset.file}`,
+              asset.file,
+              (pct) => {
+                const totalProgress = Math.round((loadedCount * 100 + pct) / assets.length);
+                setDownloadProgress(totalProgress);
+              }
+            );
+            assetMap[asset.file] = blobUrl;
+            loadedCount++;
+            setDownloadProgress(Math.round((loadedCount * 100) / assets.length));
           }
-          return path;
-        },
-        setStatus: (text: string) => {
-          if (!text) setStatusMessage("Neural Engine active");
-          else setStatusMessage(text);
-        },
-        onRuntimeInitialized: () => {
-          console.log("[useSherpa] WASM Runtime Initialized");
-          win.process = origProcess;
-          win.require = origRequire;
 
-          (async () => {
-            try {
-              console.log("[useSherpa] Configuring Neural Recognizer...");
+          const win = window as any;
+          const moduleConfig: SherpaModule = {
+            locateFile: (path: string) => {
+              if (assetMap[path]) return assetMap[path];
+              // Fallback for names that Emscripten might try (like .wasm)
+              if (path.endsWith(".wasm") && assetMap["sherpa-onnx-wasm-main-asr.wasm"]) return assetMap["sherpa-onnx-wasm-main-asr.wasm"];
+              return `${WASM_BASE_PATH}/${path}`;
+            },
+            setStatus: (text: string) => {
+              if (!text) setStatusMessage("Neural Engine active");
+              else setStatusMessage(text);
+            },
+            onRuntimeInitialized: () => {
+              console.log("[useSherpa] WASM Runtime Initialized");
+              try {
+                // If using SMALL model (for mobile or low-spec laptop), write to FS
+                if (useSmallModel) {
+                    (async () => {
+                        const encoderBytes = await modelCache.getBytes("encoder.onnx");
+                        const decoderBytes = await modelCache.getBytes("decoder.onnx");
+                        const joinerBytes = await modelCache.getBytes("joiner.onnx");
+                        const tokensBytes = await modelCache.getBytes("tokens.txt");
 
-              const config = {
-                featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
-                modelConfig: {
-                  transducer: {
-                    encoder: "./encoder.onnx",
-                    decoder: "./decoder.onnx",
-                    joiner: "./joiner.onnx",
-                  },
-                  tokens: "./tokens.txt",
-                  modelType: "zipformer",
-                },
-              };
+                        if (encoderBytes) win.Module.FS.writeFile("encoder.onnx", encoderBytes);
+                        if (decoderBytes) win.Module.FS.writeFile("decoder.onnx", decoderBytes);
+                        if (joinerBytes) win.Module.FS.writeFile("joiner.onnx", joinerBytes);
+                        if (tokensBytes) win.Module.FS.writeFile("tokens.txt", tokensBytes);
 
-              const recognizer = window.createOnlineRecognizer(window.Module, config);
-              if (!recognizer) throw new Error("createOnlineRecognizer returned null");
+                        const config = {
+                          featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
+                          modelConfig: {
+                            transducer: {
+                              encoder: "./encoder.onnx",
+                              decoder: "./decoder.onnx",
+                              joiner: "./joiner.onnx",
+                            },
+                            tokens: "./tokens.txt",
+                            modelType: "zipformer",
+                          },
+                          // VAD Optimization for Mobile
+                          endpointConfig: {
+                            rule1: { keepMaxFrames: 240, minUtteranceLength: 0.0, minSilenceTokenCount: 12 }, // ~2.4s silence rule
+                            rule2: { keepMaxFrames: 120, minUtteranceLength: 0.0, minSilenceTokenCount: 8 },  // ~1.2s silence rule
+                            rule3: { keepMaxFrames: 20, minUtteranceLength: 0.0, minSilenceTokenCount: 4 }     // Immediate end
+                          }
+                        };
 
-              recognizerRef.current = recognizer;
-              setStatus("ready");
-              setStatusMessage("Ready — Click Start to begin reading");
-              resolve();
-            } catch (err) {
-              console.error("[useSherpa] Initialization Failure:", err);
-              setStatus("error");
-              setStatusMessage(`ASR Initializer Failed: ${formatInitError(err)}`);
-              reject(err);
+                        const recognizer = window.createOnlineRecognizer(window.Module, config);
+                        recognizerRef.current = recognizer;
+                        setStatus("ready");
+                        setStatusMessage("Ready — Click Start to begin reading");
+                        resolve();
+                    })();
+                } else {
+                    // Standard Large Model Path
+                    const config = {
+                      featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
+                      modelConfig: {
+                        transducer: {
+                          encoder: "./encoder.onnx",
+                          decoder: "./decoder.onnx",
+                          joiner: "./joiner.onnx",
+                        },
+                        tokens: assetMap["tokens.txt"] || "./tokens.txt",
+                        modelType: "zipformer",
+                      },
+                    };
+                    const recognizer = window.createOnlineRecognizer(window.Module, config);
+                    recognizerRef.current = recognizer;
+                    setStatus("ready");
+                    setStatusMessage("Ready — Click Start to begin reading");
+                    resolve();
+                }
+              } catch (err) {
+                setStatus("error");
+                setStatusMessage(`ASR Initializer Failed: ${formatInitError(err)}`);
+                reject(err);
+              }
             }
-          })().catch(reject);
-        }
-      };
+          };
 
-      window.Module = moduleConfig;
+          window.Module = moduleConfig;
 
-      const apiScriptPath = `${WASM_BASE_PATH}/sherpa-onnx.js`;
-      const apiScript = document.createElement("script");
-      apiScript.src = apiScriptPath;
-      apiScript.async = true;
-      apiScript.onload = () => {
-        const glueScriptPath = `${WASM_BASE_PATH}/sherpa-onnx-wasm-main-asr.js`;
-        const glueScript = document.createElement("script");
-        glueScript.src = glueScriptPath;
-        glueScript.async = true;
-        glueScript.onerror = () => {
+          // Injected pre-cached scripts
+          const apiScript = document.createElement("script");
+          apiScript.src = assetMap["sherpa-onnx.js"];
+          apiScript.onload = () => {
+            const glueScript = document.createElement("script");
+            glueScript.src = assetMap["sherpa-onnx-wasm-main-asr.js"];
+            glueScript.onerror = () => {
+              setStatus("error");
+              setStatusMessage("Failed to load binary glue");
+              reject(new Error("Glue fetch failure"));
+            };
+            document.head.appendChild(glueScript);
+          };
+          document.head.appendChild(apiScript);
+
+        } catch (err) {
           setStatus("error");
-          setStatusMessage("Failed to load binary glue");
-          reject(new Error("Glue fetch failure"));
-        };
-        document.head.appendChild(glueScript);
-      };
-      apiScript.onerror = () => {
-        setStatus("error");
-        setStatusMessage("Failed to load API");
-        reject(new Error("API fetch failure"));
-      };
-      document.head.appendChild(apiScript);
+          setStatusMessage(`Failed to cache models: ${formatInitError(err)}`);
+          reject(err);
+        }
+      })();
     });
   }, []);
 
@@ -275,13 +350,16 @@ export function useSherpa(story: Story | null): SherpaHookResult {
     let matchedPos: { cursor: ReadingCursor; word: Word } | null = null;
     let scanCursor: ReadingCursor | null = { ...curCursor };
 
-    for (let i = 0; i < 5; i++) {
+    const useSmallModel = isMobileRef.current;
+    
+    for (let i = 0; i < (useSmallModel ? 8 : 5); i++) {
         if (!scanCursor) break;
         const targetWord = getWordAtCursor(curStory, scanCursor);
         if (!targetWord) break;
 
         const isExact = lastToken === targetWord.text;
-        const isFuzzy = targetWord.text.length > 2 && levenshteinDistance(lastToken, targetWord.text) <= 1;
+        const fuzzyThreshold = useSmallModel ? 2 : 1;
+        const isFuzzy = targetWord.text.length > 2 && levenshteinDistance(lastToken, targetWord.text) <= fuzzyThreshold;
 
         if (isExact || isFuzzy) {
           matchedPos = { cursor: { ...scanCursor }, word: targetWord };
@@ -460,5 +538,5 @@ export function useSherpa(story: Story | null): SherpaHookResult {
     setRecognizedText("");
   }, []);
 
-  return { status, statusMessage, start, stop, recognizedText, cursor, correctCount, advanceManual };
+  return { status, statusMessage, downloadProgress, start, stop, recognizedText, cursor, correctCount, advanceManual };
 }

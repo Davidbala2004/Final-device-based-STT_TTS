@@ -34,7 +34,7 @@ export default function ReadingApp() {
     return map;
   }, [story]);
   
-  const { status, start: startSherpa, stop: stopSherpa, cursor, correctCount, recognizedText, advanceManual } = useSherpa(story);
+  const { status, statusMessage, downloadProgress, start: startSherpa, stop: stopSherpa, cursor, correctCount, recognizedText, advanceManual } = useSherpa(story);
   const { isRecording, startRecording, stopRecording } = useAudioRecorder();
   const { isEvaluating, result, evaluateReading } = useEvaluation();
 
@@ -443,11 +443,13 @@ export default function ReadingApp() {
         <span className="text-purple-400 text-sm font-semibold tracking-wider">
           {pausePrompt
             ? coachMessage
-            : isRecording
-              ? coachMessage
-              : status === "ready"
-                ? "Connected! Start reading..."
-                : "Initializing..."}
+            : status === "loading"
+              ? `Downloading AI Engines: ${downloadProgress}% (First time only)`
+              : isRecording
+                ? coachMessage
+                : status === "ready"
+                  ? "Connected! Start reading..."
+                  : "Initializing..."}
         </span>
       </div>
 

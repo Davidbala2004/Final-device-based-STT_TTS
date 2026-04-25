@@ -1,4 +1,4 @@
-# --- BUILD CACHE BREAKER: 2026-04-14-v2 ---
+# --- BUILD CACHE BREAKER: 2026-04-24-v3 ---
 FROM node:20-alpine
 
 WORKDIR /app
@@ -20,11 +20,9 @@ COPY . .
 RUN test -d app/api/evaluation/evaluate && test -d app/results || (echo "CRITICAL: app directory sync failed" && exit 1)
 
 RUN npm run download-model \
-    && test -s public/sherpa-onnx/sherpa-onnx.js \
-    && test -s public/sherpa-onnx/sherpa-onnx-wasm-main-asr.js \
-    && test -s public/sherpa-onnx/sherpa-onnx-wasm-main-asr.wasm \
     && test -s public/sherpa-onnx/sherpa-onnx-wasm-main-asr.data \
-    && test -s public/sherpa-onnx/tokens.txt
+    && test -s public/sherpa-onnx-small/encoder.onnx \
+    && test -s public/sherpa-onnx-small/tokens.txt
 
 RUN npm run build
 
